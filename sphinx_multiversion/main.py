@@ -67,6 +67,7 @@ def load_sphinx_config_worker(q, confpath, confoverrides, add_defaults):
                 str,
             )
             current_config.add("smv_prefer_remote_refs", False, "html", bool)
+            current_config.add("smv_prebuild_command", "", "html", str)
         current_config.pre_init_values()
         current_config.init_values()
     except Exception as err:
@@ -289,6 +290,7 @@ def main(argv=None):
                 ),
                 "confdir": confpath,
                 "docnames": list(project.discover()),
+                "commit": gitref.commit,
             }
 
         if args.dump_metadata:
@@ -329,7 +331,29 @@ def main(argv=None):
                     *args.filenames,
                 ]
             )
-            logger.debug("Running sphinx-build with args: %r", current_argv)
+
+            current_cwd = os.path.join(data["basedir"], cwd_relative)
+
+            env = os.environ.copy()
+
+            if config.smv_prebuild_command != "":
+                logger.info("Running prebuild command: %r", config.smv_prebuild_command)
+
+                cpi = subprocess.run(
+                    config.smv_prebuild_command,
+                    cwd=current_cwd,
+                    shell=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    env=env,
+                    executable="/bin/bash",
+                )
+
+                if cpi.returncode != 0:
+                    print(cpi.stdout.decode("UTF-8"), file=sys.stderr, flush=True)
+                    raise subprocess.CalledProcessError
+
+            logger.info("Running sphinx-build with args: %r", current_argv)
             cmd = (
                 sys.executable,
                 *get_python_flags(),
@@ -337,8 +361,7 @@ def main(argv=None):
                 "sphinx",
                 *current_argv,
             )
-            current_cwd = os.path.join(data["basedir"], cwd_relative)
-            env = os.environ.copy()
+
             env.update(
                 {
                     "SPHINX_MULTIVERSION_NAME": data["name"],
