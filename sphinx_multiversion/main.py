@@ -8,6 +8,7 @@ import logging
 import os
 import pathlib
 import re
+import shutil
 import string
 import subprocess
 import sys
@@ -67,6 +68,7 @@ def load_sphinx_config_worker(q, confpath, confoverrides, add_defaults):
                 str,
             )
             current_config.add("smv_prefer_remote_refs", False, "html", bool)
+            current_config.add("smv_build_dir", "", "html", str)
             current_config.add("smv_prebuild_command", "", "html", str)
         current_config.pre_init_values()
         current_config.init_values()
@@ -221,157 +223,176 @@ def main(argv=None):
 
     logger = logging.getLogger(__name__)
 
-    with tempfile.TemporaryDirectory() as tmp:
-        # Generate Metadata
-        metadata = {}
-        outputdirs = set()
-        for gitref in gitrefs:
-            # Clone Git repo
-            repopath = os.path.join(tmp, gitref.commit)
-            try:
-                git.copy_tree(str(gitroot), gitroot.as_uri(), repopath, gitref)
-            except (OSError, subprocess.CalledProcessError):
-                logger.error(
-                    "Failed to copy git tree for %s to %s",
-                    gitref.refname,
-                    repopath,
-                )
-                continue
+    if config.smv_build_dir:
+        tmp = pathlib.Path(config.smv_build_dir).resolve()
+        if tmp.exists():
+            shutil.rmtree(str(tmp))
+        tmp.mkdir()
+        tmp = str(tmp)
+    else:
+        tmp = tempfile.TemporaryDirectory().name
 
-            # Find config
-            confpath = os.path.join(repopath, confdir)
-            try:
-                current_config = load_sphinx_config(confpath, confoverrides)
-            except (OSError, sphinx_config.ConfigError):
-                logger.error(
-                    "Failed load config for %s from %s",
-                    gitref.refname,
-                    confpath,
-                )
-                continue
-
-            # Ensure that there are not duplicate output dirs
-            outputdir = config.smv_outputdir_format.format(
-                ref=gitref,
-                config=current_config,
+    # Generate Metadata
+    metadata = {}
+    outputdirs = set()
+    for gitref in gitrefs:
+        # Clone Git repo
+        repopath = os.path.join(tmp, gitref.commit)
+        try:
+            git.copy_tree(str(gitroot), gitroot.as_uri(), repopath, gitref)
+        except (OSError, subprocess.CalledProcessError):
+            logger.error(
+                "Failed to copy git tree for %s to %s",
+                gitref.refname,
+                repopath,
             )
-            if outputdir in outputdirs:
-                logger.warning(
-                    "outputdir '%s' for %s conflicts with other versions",
-                    outputdir,
-                    gitref.refname,
-                )
-                continue
-            outputdirs.add(outputdir)
+            continue
 
-            # Get List of files
-            source_suffixes = current_config.source_suffix
-            if isinstance(source_suffixes, str):
-                source_suffixes = [current_config.source_suffix]
-
-            current_sourcedir = os.path.join(repopath, sourcedir)
-            project = sphinx_project.Project(
-                current_sourcedir, source_suffixes
+        # Find config
+        confpath = os.path.join(repopath, confdir)
+        try:
+            current_config = load_sphinx_config(confpath, confoverrides)
+        except (OSError, sphinx_config.ConfigError):
+            logger.error(
+                "Failed load config for %s from %s",
+                gitref.refname,
+                confpath,
             )
-            metadata[gitref.name] = {
-                "name": gitref.name,
-                "version": current_config.version,
-                "release": current_config.release,
-                "rst_prolog": current_config.rst_prolog,
-                "is_released": bool(
-                    re.match(config.smv_released_pattern, gitref.refname)
-                ),
-                "source": gitref.source,
-                "creatordate": gitref.creatordate.strftime(sphinx.DATE_FMT),
-                "basedir": repopath,
-                "sourcedir": current_sourcedir,
-                "outputdir": os.path.join(
-                    os.path.abspath(args.outputdir), outputdir
-                ),
-                "confdir": confpath,
-                "docnames": list(project.discover()),
-                "commit": gitref.commit,
+            continue
+
+        # Ensure that there are not duplicate output dirs
+        outputdir = config.smv_outputdir_format.format(
+            ref=gitref,
+            config=current_config,
+        )
+        if outputdir in outputdirs:
+            logger.warning(
+                "outputdir '%s' for %s conflicts with other versions",
+                outputdir,
+                gitref.refname,
+            )
+            continue
+        outputdirs.add(outputdir)
+
+        # Get List of files
+        source_suffixes = current_config.source_suffix
+        if isinstance(source_suffixes, str):
+            source_suffixes = [current_config.source_suffix]
+
+        current_sourcedir = os.path.join(repopath, sourcedir)
+        project = sphinx_project.Project(
+            current_sourcedir, source_suffixes
+        )
+        metadata[gitref.name] = {
+            "name": gitref.name,
+            "version": current_config.version,
+            "release": current_config.release,
+            "rst_prolog": current_config.rst_prolog,
+            "is_released": bool(
+                re.match(config.smv_released_pattern, gitref.refname)
+            ),
+            "source": gitref.source,
+            "creatordate": gitref.creatordate.strftime(sphinx.DATE_FMT),
+            "basedir": repopath,
+            "sourcedir": current_sourcedir,
+            "outputdir": os.path.join(
+                os.path.abspath(args.outputdir), outputdir
+            ),
+            "confdir": confpath,
+            "docnames": list(project.discover()),
+            "commit": gitref.commit,
+        }
+
+    if args.dump_metadata:
+        print(json.dumps(metadata, indent=2))
+        return 0
+
+    if not metadata:
+        logger.error("No matching refs found!")
+        return 2
+
+    # Write Metadata
+    metadata_path = os.path.abspath(os.path.join(tmp, "versions.json"))
+    with open(metadata_path, mode="w") as fp:
+        json.dump(metadata, fp, indent=2)
+
+    # Run Sphinx
+    argv.extend(["-D", "smv_metadata_path={}".format(metadata_path)])
+    for version_name, data in metadata.items():
+        os.makedirs(data["outputdir"], exist_ok=True)
+
+        defines = itertools.chain(
+            *(
+                ("-D", string.Template(d).safe_substitute(data))
+                for d in args.define
+            )
+        )
+
+        current_argv = argv.copy()
+        current_argv.extend(
+            [
+                *defines,
+                "-D",
+                "smv_current_version={}".format(version_name),
+                "-c",
+                confdir_absolute,
+                data["sourcedir"],
+                data["outputdir"],
+                *args.filenames,
+            ]
+        )
+
+        current_cwd = os.path.join(data["basedir"], cwd_relative)
+
+        env = os.environ.copy()
+
+        template_subs = {
+            "current_cwd": current_cwd,
+            "sourcedir": data["sourcedir"],
+            "outdir": data["outputdir"],
+            "real_cwd": str(pathlib.Path().resolve()),
+        }
+
+        if config.smv_prebuild_command != "":
+            prebuild_cmd = config.smv_prebuild_command.format(**template_subs)
+            logger.info("Running prebuild command: %r", prebuild_cmd)
+
+            cpi = subprocess.run(
+                prebuild_cmd,
+                cwd=current_cwd,
+                shell=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                env=env,
+                executable="/bin/bash",
+            )
+
+            if cpi.returncode != 0:
+                print(cpi.stdout.decode("UTF-8"), file=sys.stderr, flush=True)
+                raise subprocess.CalledProcessError
+
+        logger.info("Running sphinx-build with args: %r", current_argv)
+        cmd = (
+            sys.executable,
+            *get_python_flags(),
+            "-m",
+            "sphinx",
+            *current_argv,
+        )
+
+        env.update(
+            {
+                "SPHINX_MULTIVERSION_NAME": data["name"],
+                "SPHINX_MULTIVERSION_VERSION": data["version"],
+                "SPHINX_MULTIVERSION_RELEASE": data["release"],
+                "SPHINX_MULTIVERSION_SOURCEDIR": data["sourcedir"],
+                "SPHINX_MULTIVERSION_OUTPUTDIR": data["outputdir"],
+                "SPHINX_MULTIVERSION_CONFDIR": data["confdir"],
             }
+        )
+        subprocess.check_call(cmd, cwd=current_cwd, env=env)
 
-        if args.dump_metadata:
-            print(json.dumps(metadata, indent=2))
-            return 0
-
-        if not metadata:
-            logger.error("No matching refs found!")
-            return 2
-
-        # Write Metadata
-        metadata_path = os.path.abspath(os.path.join(tmp, "versions.json"))
-        with open(metadata_path, mode="w") as fp:
-            json.dump(metadata, fp, indent=2)
-
-        # Run Sphinx
-        argv.extend(["-D", "smv_metadata_path={}".format(metadata_path)])
-        for version_name, data in metadata.items():
-            os.makedirs(data["outputdir"], exist_ok=True)
-
-            defines = itertools.chain(
-                *(
-                    ("-D", string.Template(d).safe_substitute(data))
-                    for d in args.define
-                )
-            )
-
-            current_argv = argv.copy()
-            current_argv.extend(
-                [
-                    *defines,
-                    "-D",
-                    "smv_current_version={}".format(version_name),
-                    "-c",
-                    confdir_absolute,
-                    data["sourcedir"],
-                    data["outputdir"],
-                    *args.filenames,
-                ]
-            )
-
-            current_cwd = os.path.join(data["basedir"], cwd_relative)
-
-            env = os.environ.copy()
-
-            if config.smv_prebuild_command != "":
-                logger.info("Running prebuild command: %r", config.smv_prebuild_command)
-
-                cpi = subprocess.run(
-                    config.smv_prebuild_command,
-                    cwd=current_cwd,
-                    shell=True,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    env=env,
-                    executable="/bin/bash",
-                )
-
-                if cpi.returncode != 0:
-                    print(cpi.stdout.decode("UTF-8"), file=sys.stderr, flush=True)
-                    raise subprocess.CalledProcessError
-
-            logger.info("Running sphinx-build with args: %r", current_argv)
-            cmd = (
-                sys.executable,
-                *get_python_flags(),
-                "-m",
-                "sphinx",
-                *current_argv,
-            )
-
-            env.update(
-                {
-                    "SPHINX_MULTIVERSION_NAME": data["name"],
-                    "SPHINX_MULTIVERSION_VERSION": data["version"],
-                    "SPHINX_MULTIVERSION_RELEASE": data["release"],
-                    "SPHINX_MULTIVERSION_SOURCEDIR": data["sourcedir"],
-                    "SPHINX_MULTIVERSION_OUTPUTDIR": data["outputdir"],
-                    "SPHINX_MULTIVERSION_CONFDIR": data["confdir"],
-                }
-            )
-            subprocess.check_call(cmd, cwd=current_cwd, env=env)
+    if not config.smv_build_dir:
+        shutil.rmtree(tmp)
 
     return 0
