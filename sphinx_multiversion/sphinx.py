@@ -27,6 +27,7 @@ Version = collections.namedtuple(
         "version",
         "release",
         "is_released",
+        "commit",
     ],
 )
 
@@ -45,6 +46,7 @@ class VersionInfo:
             version=v["version"],
             release=v["release"],
             is_released=v["is_released"],
+            commit=v["commit"],
         )
 
     @property
