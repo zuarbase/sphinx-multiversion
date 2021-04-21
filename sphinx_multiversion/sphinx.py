@@ -32,6 +32,26 @@ Version = collections.namedtuple(
 )
 
 
+def normalize_version(string):
+    " normalize release numbers for sorting "
+
+    sep = "."
+    maxlen = "06"
+
+    new_substrs = []
+
+    for substr in string.split(sep):
+
+        try:
+            val = int(substr)
+            new_substrs.append(f"{val:{maxlen}d}")
+        except ValueError:
+            val = (" " * int(maxlen)) + substr
+            new_substrs.append(val[-int(maxlen):])
+
+    return f"{sep}".join(new_substrs)
+
+
 class VersionInfo:
     def __init__(self, app, context, metadata, current_version_name):
         self.app = app
@@ -50,10 +70,19 @@ class VersionInfo:
         )
 
     @property
+    def sorted_metadata_keys(self):
+        return sorted(self.metadata.keys(), key=normalize_version)
+
+    @property
+    def sorted_metadata_values(self):
+        for k in self.sorted_metadata_keys:
+            yield self.metadata[k]
+
+    @property
     def tags(self):
         return [
             self._dict_to_versionobj(v)
-            for v in self.metadata.values()
+            for v in self.sorted_metadata_values
             if v["source"] == "tags"
         ]
 
@@ -61,7 +90,7 @@ class VersionInfo:
     def branches(self):
         return [
             self._dict_to_versionobj(v)
-            for v in self.metadata.values()
+            for v in self.sorted_metadata_values
             if v["source"] != "tags"
         ]
 
@@ -69,7 +98,7 @@ class VersionInfo:
     def releases(self):
         return [
             self._dict_to_versionobj(v)
-            for v in self.metadata.values()
+            for v in self.sorted_metadata_values
             if v["is_released"]
         ]
 
@@ -77,7 +106,7 @@ class VersionInfo:
     def in_development(self):
         return [
             self._dict_to_versionobj(v)
-            for v in self.metadata.values()
+            for v in self.sorted_metadata_values
             if not v["is_released"]
         ]
 
