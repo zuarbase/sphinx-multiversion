@@ -270,11 +270,13 @@ def main(argv=None):
         # command-line arg.
 
         # make a copy of conf.py from version being built
-        original_conf = (pathlib.Path(confpath) / "conf.py").read_text()
+        # original_conf = (pathlib.Path(confpath) / "conf.py").read_text()
 
         # replace with conf.py from currently checked out version
-        current_conf = pathlib.Path("/repo/docs/src/conf.py").read_text()
-        (pathlib.Path(confpath) / 'conf.py').write_text(current_conf)
+        # current_conf = pathlib.Path("/repo/docs/src/conf.py").read_text()
+        # (pathlib.Path(confpath) / 'conf.py').write_text(current_conf)
+
+        confpath = "/repo/docs/src"
 
         try:
             current_config = load_sphinx_config(confpath, confoverrides)
@@ -287,7 +289,7 @@ def main(argv=None):
             continue
 
         # restore original conf.py so that repo isn't marked as having changes
-        (pathlib.Path(confpath) / 'conf.py').write_text(original_conf)
+        # (pathlib.Path(confpath) / 'conf.py').write_text(original_conf)
 
         # Ensure that there are not duplicate output dirs
         outputdir = config.smv_outputdir_format.format(
