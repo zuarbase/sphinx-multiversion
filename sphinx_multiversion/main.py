@@ -250,6 +250,32 @@ def main(argv=None):
 
         # Find config
         confpath = os.path.join(repopath, confdir)
+
+        # sphinx-multiversion docs state that only the conf.py of
+        # the currently checked out repo (i.e., the version of the
+        # repo being used to build all versions of the documentation)
+        # is used. That statement is 100% false.
+        #
+        # They load the conf.py from the version of the repo
+        # for which documentation will be built.  This means that if
+        # something completely incompatible is done in an older conf.py,
+        # e.g., 'import mitto', then the build of the docs will break.
+        # Here, we override this behavior by using the conf from the
+        # currently checked-out repo, which is mounted at /repo in
+        # the container.
+        #
+        # This is a bad hack, but it may work for Zuar and it may
+        # be sufficient to get docs built using Docker.  It should
+        # be revisited and done properly;  It should probably be a
+        # command-line arg.
+
+        # make a copy of conf.py from version being built
+        original_conf = (pathlib.Path(confpath) / "conf.py").read_text()
+
+        # replace with conf.py from currently checked out version
+        current_conf = pathlib.Path("/repo/docs/src/conf.py").read_text()
+        (pathlib.Path(confpath) / 'conf.py').write_text(current_conf)
+
         try:
             current_config = load_sphinx_config(confpath, confoverrides)
         except (OSError, sphinx_config.ConfigError):
@@ -259,6 +285,9 @@ def main(argv=None):
                 confpath,
             )
             continue
+
+        # restore original conf.py so that repo isn't marked as having changes
+        (pathlib.Path(confpath) / 'conf.py').write_text(original_conf)
 
         # Ensure that there are not duplicate output dirs
         outputdir = config.smv_outputdir_format.format(
