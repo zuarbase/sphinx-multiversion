@@ -278,6 +278,13 @@ def main(argv=None):
 
         confpath = "/repo/docs/src"
 
+        # original_conf = (pathlib.Path(confpath) / "conf.py").read_text()
+
+        # replace with conf.py from currently checked out version
+        # current_conf = pathlib.Path("/repo/docs/src/conf.py").read_text()
+        # (pathlib.Path(confpath) / 'conf.py').write_text(current_conf)
+
+
         try:
             current_config = load_sphinx_config(confpath, confoverrides)
         except (OSError, sphinx_config.ConfigError):
