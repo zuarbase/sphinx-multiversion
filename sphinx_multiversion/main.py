@@ -180,6 +180,12 @@ def main(argv=None):
     confoverrides = {}
     for d in args.define:
         key, _, value = d.partition("=")
+        # remove leading/trailing " and ' from key and value
+        # happens for some reason when passing in, e.g.: "-D 'foo=bar, baz'"
+        if key.startswith("'") or key.startswith('"'):
+            key = key[1:]
+        if value.endswith("'") or value.endswith('"'):
+            value = value[:-1]
         confoverrides[key] = value
 
     # Parse config
