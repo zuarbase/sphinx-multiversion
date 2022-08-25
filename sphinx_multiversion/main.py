@@ -180,18 +180,22 @@ def main(argv=None):
     confoverrides = {}
     for d in args.define:
         key, _, value = d.partition("=")
-        # remove leading/trailing " and ' from key and value
-        # happens for some reason when passing in, e.g.: "-D 'foo=bar, baz'"
-        if key.startswith("'") or key.startswith('"'):
-            key = key[1:]
-        if value.endswith("'") or value.endswith('"'):
-            value = value[:-1]
+        # remove leading/trailing " and ' from value, if present
+        # happens when passing in, e.g.: "-D foo='bar, baz'", '-D foo="bar, baz"'
+        for quote in "\"'":
+            if value.startswith(quote) or value.endswith(quote):
+                value = value.strip(quote)
+                break
         confoverrides[key] = value
+
+    logger.error(f"{confoverrides=}")
 
     # Parse config
     config = load_sphinx_config(
         confdir_absolute, confoverrides, add_defaults=True
     )
+
+    logger.error(f"{config.values=}")
 
     # Get relative paths to root of git repository
     gitroot = pathlib.Path(
@@ -360,17 +364,52 @@ def main(argv=None):
     with open(metadata_path, mode="w") as fp:
         json.dump(metadata, fp, indent=2)
 
+    def stripq(val):
+        for quote in ["'", '"']:
+            if val.startswith(quote) or val.endswith(quote):
+                val = val.strip(quote)
+                break
+        return val
+
+    logger.error(f"{args.define=}")
+
+    val = "'foo'"
+    logger.error(f"{val=}")
+    
+    val = '"foo"'
+    logger.error(f'{val=}')
+
+    val = '"foo"'
+    logger.error(f"{val=}")
+
+    val = "foo"
+    logger.error(f"{val=}")
+
+
+    for d in args.define:
+        logger.error(f"{d=}")
+    for d in args.define:
+        logger.error(f"{stripq(d)=}")
+
     # Run Sphinx
     argv.extend(["-D", "smv_metadata_path={}".format(metadata_path)])
     for version_name, data in metadata.items():
         os.makedirs(data["outputdir"], exist_ok=True)
 
+        logger.error(f"{data=}")
+        for d in args.define:
+            logger.error(f"{d=}")
+
         defines = itertools.chain(
             *(
-                ("-D", string.Template(d).safe_substitute(data))
+                ("-D", string.Template(stripq(d)).safe_substitute(data))
                 for d in args.define
             )
         )
+
+        info = [d for d in defines]
+
+        logger.error(f"{info=}")
 
         current_argv = argv.copy()
         current_argv.extend(
