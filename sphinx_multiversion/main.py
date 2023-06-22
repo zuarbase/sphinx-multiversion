@@ -267,11 +267,11 @@ def main(argv=None):
         # is used. That statement is 100% false.
         #
         # They load the conf.py from the version of the repo
-        # for which documentation will be built.  This means that if
+        # for which documentation is being built.  This means that if
         # something completely incompatible is done in an older conf.py,
         # e.g., 'import mitto', then the build of the docs will break.
         # Here, we override this behavior by using the conf from the
-        # currently checked-out repo, which is mounted at /repo in
+        # currently checked-out repo, which is mounted at /docs in
         # the container.
         #
         # This is a bad hack, but it may work for Zuar and it may
@@ -286,7 +286,10 @@ def main(argv=None):
         # current_conf = pathlib.Path("/repo/docs/src/conf.py").read_text()
         # (pathlib.Path(confpath) / 'conf.py').write_text(current_conf)
 
-        confpath = "/repo/docs/src"
+        # before 2023-06-22
+        # confpath = "/repo/docs/src"
+
+        confpath = "/docs/src"
 
         # original_conf = (pathlib.Path(confpath) / "conf.py").read_text()
 
