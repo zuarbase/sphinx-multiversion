@@ -163,11 +163,19 @@ def main(argv=None):
         action="store_true",
         help="dump generated metadata and exit",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="set loglevel=DEBUG",
+    )
+
     args, argv = parser.parse_known_args(argv)
     if args.noconfig:
         return 1
 
     logger = logging.getLogger(__name__)
+    if args.debug:
+        logging.basicConfig(level=logging.DEBUG)
 
     sourcedir_absolute = os.path.abspath(args.sourcedir)
     confdir_absolute = (
@@ -188,14 +196,14 @@ def main(argv=None):
                 break
         confoverrides[key] = value
 
-    logger.error(f"{confoverrides=}")
+    logger.debug(f"{confoverrides=}")
 
     # Parse config
     config = load_sphinx_config(
         confdir_absolute, confoverrides, add_defaults=True
     )
 
-    logger.error(f"{config.values=}")
+    logger.debug(f"{config.values=}")
 
     # Get relative paths to root of git repository
     gitroot = pathlib.Path(
@@ -258,9 +266,6 @@ def main(argv=None):
             )
             continue
 
-        # Find config
-        confpath = os.path.join(repopath, confdir)
-
         # sphinx-multiversion docs state that only the conf.py of
         # the currently checked out repo (i.e., the version of the
         # repo being used to build all versions of the documentation)
@@ -279,24 +284,7 @@ def main(argv=None):
         # be revisited and done properly;  It should probably be a
         # command-line arg.
 
-        # make a copy of conf.py from version being built
-        # original_conf = (pathlib.Path(confpath) / "conf.py").read_text()
-
-        # replace with conf.py from currently checked out version
-        # current_conf = pathlib.Path("/repo/docs/src/conf.py").read_text()
-        # (pathlib.Path(confpath) / 'conf.py').write_text(current_conf)
-
-        # before 2023-06-22
-        # confpath = "/repo/docs/src"
-
-        confpath = "/docs/src"
-
-        # original_conf = (pathlib.Path(confpath) / "conf.py").read_text()
-
-        # replace with conf.py from currently checked out version
-        # current_conf = pathlib.Path("/repo/docs/src/conf.py").read_text()
-        # (pathlib.Path(confpath) / 'conf.py').write_text(current_conf)
-
+        confpath = confdir_absolute
 
         try:
             current_config = load_sphinx_config(confpath, confoverrides)
@@ -307,9 +295,6 @@ def main(argv=None):
                 confpath,
             )
             continue
-
-        # restore original conf.py so that repo isn't marked as having changes
-        # (pathlib.Path(confpath) / 'conf.py').write_text(original_conf)
 
         # Ensure that there are not duplicate output dirs
         outputdir = config.smv_outputdir_format.format(
